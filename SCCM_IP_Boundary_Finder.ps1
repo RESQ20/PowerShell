@@ -7,8 +7,8 @@
 #>
 
 param (
-    [Parameter(Mandatory,HelpMessage="Provide IP Address to find a Boundary for:")] $IP,  #166.5.154.70 
-    [Parameter(Mandatory,HelpMessage="What SCCM Server do you want to search on:")] $SCCMServer  #"USW00131101.HNAH.ADROOT.HSBC"
+    [Parameter(Mandatory,HelpMessage="Provide IP Address to find a Boundary for:")] $IP, 
+    [Parameter(Mandatory,HelpMessage="What SCCM Server do you want to search on:")] $SCCMServer 
 )
 
 function Convert-IPv4
