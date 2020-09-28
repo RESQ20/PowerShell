@@ -1,3 +1,4 @@
+
 <# 
 .SYNOPSIS
     Get the computers Domain
@@ -67,7 +68,15 @@ Function Do_HTTP_DIR_Download
     [Parameter(Mandatory=$true)] [String] $DownloadPath
 )
 {
-    $HTTPGet = Invoke-WebRequest $HTTPFolder -ErrorAction Stop
+    Try {
+        Write-Host "[DEBUG] $HTTPFolder"
+        $HTTPGet = Invoke-WebRequest $HTTPFolder # -ErrorAction Stop
+    } Catch {
+        Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Funtion: Do-HTTP_DIR_Download : $($error[0])"
+    }
+
+    Write-Host "[DEBUG] $($HTTPGet.links)"
+
     $AllLinks = $HTTPGet.links | Where-Object {$_.innerHTML -ne "[To Parent Directory]" -and $_.innerHTML -ne 'web.config'} #| Select -Skip 23
     #$CMDBrowser.links | format-table
     foreach ($link in $AllLinks) {
@@ -124,7 +133,12 @@ $MyScriptFullPath = Split-Path $SCRIPT:MyInvocation.MyCommand.Path -parent
 $MyScriptName = Split-Path $SCRIPT:MyInvocation.MyCommand.Path -leaf
 Write-Host "Executing:     $MyScriptFullPath\$MyScriptName"
 $MyLogFileName = "$MyScriptName.log"
-$LogfilePath = "$($MyScriptFullPath)\$($MyScriptName.Replace('.ps1',''))_$(Get-Date -format "yyyyMMddHHmmss").log"
+
+if (!(Test-Path -Path "C:\temp")) {
+        New-Item -Path "C:\temp" -Type Directory -Force -ErrorAction Stop | Out-Null
+    }
+
+$LogfilePath = "C:\temp\SCCM_Client_Install_Health.log"
  
 LogWrite -Mylogfile $LogfilePath -MyLogEntry "Executing:    $MyScriptFullPath\$MyScriptName"
 LogWrite -Mylogfile $LogfilePath -MyLogEntry "Running As:   $MyDomain\$MyUser on $MyComputername"
@@ -132,7 +146,7 @@ LogWrite -Mylogfile $LogfilePath -MyLogEntry "Running As:   $MyDomain\$MyUser on
  
 #Test to see if the SCCM Client is present and when it last spoke to SCCM
 $CCMExecService = $null
-$CCMExecService = Get-Service -Name CcmExec
+$CCMExecService = Get-Service -Name CcmExec -ErrorAction SilentlyContinue
 If($CCMExecService) {
     Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Found existsing of the CCMEXEC Service | " -BackgroundColor Yellow -ForegroundColor Black -NoNewline
     
@@ -176,11 +190,18 @@ If($ListofSCCMMPs.count -eq 0) {
 }
  
 #Convert that list to useable format and then select at random which one to use
-$MPS = $ListofSCCMMPs | SELECT @{L="Name";E={$_.properties["name"]}},@{L="dNSHostName";E={$_.properties["dNSHostName"]}},@{L="DistinguishedName";E={$_.properties["distinguishedname"]}},@{L="whenChanged";E={$_.properties["whenChanged"]}},@{L="whenCreated";E={$_.properties["whenCreated"]}}
-$MPToUse = $MPS[$(Get-Random -Maximum $MPS.Count)]
-Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Randomly selected to use MP: $($MPToUse.dNSHostName)" -BackgroundColor White -ForegroundColor Blue
-LogWrite -Mylogfile $LogfilePath -MyLogEntry "Randomly selected to use MP: $($MPToUse.dNSHostName)"
-$SCCMClientDownloadURI = "http://$($MPToUse.dNSHostName)/CCM_Client/"
+If($ListofSCCMMPs.count -eq 1) {
+    $MPToUse = $ListofSCCMMPs | SELECT @{L="Name";E={$_.properties["name"]}},@{L="dNSHostName";E={$_.properties["dNSHostName"]}},@{L="DistinguishedName";E={$_.properties["distinguishedname"]}},@{L="whenChanged";E={$_.properties["whenChanged"]}},@{L="whenCreated";E={$_.properties["whenCreated"]}}
+    Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Selected to use MP: $($MPToUse.dNSHostName)" -BackgroundColor White -ForegroundColor Blue
+    LogWrite -Mylogfile $LogfilePath -MyLogEntry "Randomly selected to use MP: $($MPToUse.dNSHostName)"
+    $SCCMClientDownloadURI = "http://$($MPToUse.dNSHostName)/CCM_Client/"
+} Else {
+    $MPS = $ListofSCCMMPs | SELECT @{L="Name";E={$_.properties["name"]}},@{L="dNSHostName";E={$_.properties["dNSHostName"]}},@{L="DistinguishedName";E={$_.properties["distinguishedname"]}},@{L="whenChanged";E={$_.properties["whenChanged"]}},@{L="whenCreated";E={$_.properties["whenCreated"]}}
+    $MPToUse = $MPS[$(Get-Random -Maximum $MPS.Count)]
+    Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Randomly selected to use MP: $($MPToUse.dNSHostName)" -BackgroundColor White -ForegroundColor Blue
+    LogWrite -Mylogfile $LogfilePath -MyLogEntry "Randomly selected to use MP: $($MPToUse.dNSHostName)"
+    $SCCMClientDownloadURI = "http://$($MPToUse.dNSHostName)/CCM_Client/"
+}
  
 #Define Download targets
 [String]$Downloadurl = $SCCMClientDownloadURI   #[alias('DownloadPath')]
@@ -202,7 +223,7 @@ try
  
 }
 catch {
-    Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] $($error[0])"
+    Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Main Attempt to start download : $($error[0])"
     LogWrite -Mylogfile $LogfilePath -MyLogEntry "$($error[0])"
 }
  
@@ -214,8 +235,9 @@ Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Executing Client Ins
 cd $DownloadToFolder
 $CommandResult = .\ccmsetup.exe /forceinstall SMSSITECODE=AUTO /source:"$($DownloadToFolder)" resetinformationkey=true SMSCACHEFLAGS=PERCENTDISKSPACE SMSCACHESIZE=60
 Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] Command Returned: $CommandResult" -BackgroundColor DarkYellow -ForegroundColor Black
- 
-$CCMSETUPService = Get-Service -Name ccmsetup
+
+Sleep -Seconds 30
+$CCMSETUPService = Get-Service -Name ccmsetup -ErrorAction SilentlyContinue
 If($CCMSETUPService -and $CCMSETUPService.Status -eq "Running") {
     Write-Host "[$(Get-Date -Format "yyyy/MM/dd HH:mm:ss zzz")] The CCMSETUP Service is now running, monitor the log file 'C:\windows\ccmsetup\logs\ccmsetup.log' for status" -BackgroundColor White -ForegroundColor Blue
 } Else {
